@@ -1,0 +1,176 @@
+---
+title: Practical Machine Learning Project
+author: "By Casey Jenkins"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.  
+
+## Data Cleaning and Processing
+```{r, cache = TRUE}
+library(caret)
+library(knitr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+set.seed(31257) # For reproducibile purpose
+```
+
+# Download the data files
+```{r, cache = T}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainData <- "./data/pml-training.csv"
+testData  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainData)) {
+  download.file(trainUrl, destfile=trainData, method="curl")
+}
+if (!file.exists(testData)) {
+  download.file(testUrl, destfile=testData, method="curl")
+}
+```
+
+# Now we can import the data into R as data
+```{r, cache = T}
+trainData <- read.csv("./data/pml-training.csv")
+testData <- read.csv("./data/pml-testing.csv")
+
+class(trainData)
+dim(trainData)
+
+class(testData)
+dim(testData)
+```
+
+**The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. The "classe" variable in the training set is the outcome to predict.** 
+
+## Cleaning the data
+
+Let's remove any NA missing values.
+```{r, cache = T}
+trainData <- trainData[, colSums(is.na(trainData)) == 0] 
+testData <- testData[, colSums(is.na(testData)) == 0] 
+
+dim(trainData)
+dim(testData)
+```  
+
+# We will need to remove some columns that do not relate to accelerometer data.
+```{r, cache = T}
+classe <- trainData$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainData))
+trainData <- trainData[, !trainRemove]
+trainClean <- trainData[, sapply(trainData, is.numeric)]
+
+trainClean$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testData))
+testData <- testData[, !testRemove]
+testClean <- testData[, sapply(testData, is.numeric)]
+```
+
+After cleaning the training data set it contains 19622 observations and 53 variables, while the testing data set contains 20 observations and 53 variables.
+
+# Slicing the data to the standard 70/30 split.
+```{r, cache = T}
+inTrain <- createDataPartition(trainClean$classe, p=0.70, list=F)
+trainData <- trainClean[inTrain, ]
+testData <- trainClean[-inTrain, ]
+```
+
+## A correlation among variables is analysed before moving on to modeling
+
+**Correlation Matrix Visualization**  
+```{r, cache = T}
+corMatrix <- cor(trainData[, -length(names(trainData))])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", title = "Correlation Matrix",
+         tl.cex = 0.5, tl.col = rgb(0, 0, 0))
+```
+
+**The highly correlated variables are shown in dark colors in the graph above.**
+
+## The Data Modeling
+
+# 1. Random Forest with 5 fold (Fit the Model)
+```{r, cache = T}
+# model fit
+set.seed(31257) # For reproducibile purpose
+controlrf <- trainControl(method="cv", 5)
+rf <- train(classe ~ ., data=trainData, method="rf", trControl=controlrf, ntree=200) # Method Random Forest (rf)
+rf
+```
+
+Then, we can estimate the performance of the model on the validation data set using a confusion matrix
+```{r, cache = T}
+# prediction on Test dataset
+predictrf <- predict(rf, testData)
+confusionMatrix(testData$classe, predictrf)
+```
+
+Overall accuracy of Random Forest
+```{r, cache = T}
+accuracy <- postResample(predictrf, testData$classe)
+accuracy
+se <- 1 - as.numeric(confusionMatrix(testData$classe, predictrf)$overall[1])
+se
+```
+
+So, the estimated accuracy of the random forest model is 99.32% and the estimated sample error is 0.70%. 
+
+## Predicting for Test Data Set
+```{r, cache = T}
+# prediction on Test dataset
+result <- predict(rf, newdata=testData)
+confMatRM <- confusionMatrix(result, testData$classe)
+confMatRM
+```  
+
+**Plot matrix results**
+```{r}
+plot(confMatRM$table, col = confMatRM$byClass, 
+     main = paste("Random Forest Accuracy =",
+                  round(confMatRM$overall['Accuracy'], 4)))
+```
+
+## 2. Decision Tree (Fit the Model)
+```{r, cache = T}
+set.seed(31257) # For reproducibile purpose
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
+
+## Predicting for Test Data Set
+```{r}
+predictDT <- predict(treeModel, newdata=testData, type="class")
+confMatDT <- confusionMatrix(predictDT, testData$classe)
+confMatDT
+```
+
+**Plot matrix results**
+```{r}
+plot(confMatDT$table, col = confMatDT$byClass, 
+     main = paste("Decision Tree Accuracy =",
+                  round(confMatDT$overall['Accuracy'], 4)))
+```
+
+**Applying the Selected Model to the Test Data**
+
+**The accuracy of the 2 regression modeling methods below are:**
+**Random Forest : 0.993**
+**Decision Tree : 0.742**
+
+The Random Forest model will be applied to predict the 20 quiz results (testing dataset cleaned) as shown below.
+
+```{r}
+result <- predict(rf, testClean[, -length(names(testClean))])
+result
+```
